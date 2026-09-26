@@ -43,3 +43,6 @@ Luego visita `http://localhost:3000`.
 - 3 vidas con invencibilidad temporal al reaparecer (parpadeo)
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
+- Power-up **Escudo**: 10% de probabilidad al destruir un asteroide, dura 5 segundos y rodea la nave de una luz verde que pulveriza cualquier meteoro que toque (sin puntuación)
+- Power-up **Velocidad**: 12% de probabilidad, duplica la propulsión durante 5 segundos
+- Estrella fugaz (cometa) que aparece al destruir asteroides grandes y vale 500 puntos

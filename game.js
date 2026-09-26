@@ -66,7 +66,12 @@ const POINTS = [0, 100, 50, 20];  // puntos por tamaño
 // Power-up "Velocidad"
 const SPEED_MULT   = 2;     // multiplicador de propulsión
 const SPEED_TIME   = 5;     // duración en segundos
-const DROP_CHANCE  = 0.12;  // probabilidad de soltarlo al destruir un asteroide
+const SPEED_CHANCE = 0.12;  // peso en el sorteo de drop al destruir un asteroide
+
+// Power-up "Escudo"
+const SHIELD_TIME   = 5;    // duración en segundos
+const SHIELD_CHANCE = 0.1;  // peso en el mismo sorteo (escudo 10%, velocidad 12%)
+const SHIELD_R      = 26;   // radio del anel de luz verde
 
 // Física de colisión asteroide vs asteroide
 const IMPULSE_SHARE = 0.3;  // fracción del impulso que absorbe el mayor (mayor = menor desvío)
@@ -152,6 +157,7 @@ class Ship {
     this.invincible    = 3;
     this.shootCooldown = 0;
     this.speedTimer    = 0;   // power-up Velocidad activo
+    this.shieldTimer   = 0;   // power-up Escudo activo
     this.dead          = false;
   }
 
@@ -160,6 +166,7 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedTimer    > 0) this.speedTimer    -= dt;
+    if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const boost = this.speedTimer > 0 ? SPEED_MULT : 1;
@@ -198,7 +205,18 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = this.speedTimer > 0 ? '#0ff' : '#fff';
+
+    // Halo verde del escudo (la luz rodea la nave mientras está activo)
+    if (this.shieldTimer > 0) {
+      ctx.strokeStyle = 'rgba(0, 255, 90, 0.9)';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, SHIELD_R * (1 + Math.sin(this.shieldTimer * 12) * 0.06), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = this.shieldTimer > 0 ? '#4f4'
+                    : this.speedTimer  > 0 ? '#0ff' : '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
@@ -287,6 +305,42 @@ class SpeedUp {
     ctx.textAlign = 'center';
     ctx.fillText('x2', this.x, this.y + 4);
   }
+
+  apply(ship) { ship.speedTimer = SPEED_TIME; }
+}
+
+// ── Power-up: Escudo ──────────────────────────────────────────────────────────
+class ShieldUp {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 10;
+    this.ttl  = 12;   // desaparece si no se recoge
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    const blink = this.ttl < 3 && Math.floor(this.ttl * 6) % 2 === 0;
+    if (blink) return;
+
+    ctx.strokeStyle = '#4f4';
+    ctx.fillStyle   = '#4f4';
+    ctx.lineWidth   = 2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.font      = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('E', this.x, this.y + 4);
+  }
+
+  apply(ship) { ship.shieldTimer = SHIELD_TIME; }
 }
 
 // ── Cometa (estrella fugaz) ───────────────────────────────────────────────────
@@ -497,7 +551,9 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        if (Math.random() < DROP_CHANCE) powerups.push(new SpeedUp(a.x, a.y));
+        const drop = Math.random();   // un solo sorteo: escudo 10%, velocidad 12%
+        if (drop < SHIELD_CHANCE) powerups.push(new ShieldUp(a.x, a.y));
+        else if (drop < SHIELD_CHANCE + SPEED_CHANCE) powerups.push(new SpeedUp(a.x, a.y));
         if (a.size === 3 && Math.random() < COMET_CHANCE) {
           // No nacer encima de la nave: se empuja el punto hasta COMET_SAFE
           let cx = a.x, cy = a.y;
@@ -538,27 +594,43 @@ function update(dt) {
   for (const p of powerups) {
     if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
       p.dead = true;
-      ship.speedTimer = SPEED_TIME;
+      p.apply(ship);
       explode(p.x, p.y, 10);
     }
   }
   powerups = powerups.filter(p => !p.dead);
 
-  // Nave vs asteroide
-  if (ship.invincible <= 0) {
-    for (const a of asteroids) {
-      if (dist(ship, a) < ship.radius + a.radius * 0.82) {
+  // Nave vs asteroide: con escudo activo el impacto destruye el asteroide (sin puntos)
+  const shieldKills = [];
+  for (const a of asteroids) {
+    if (dist(ship, a) < ship.radius + a.radius * 0.82) {
+      if (ship.shieldTimer > 0) {
+        a.dead = true;
+        explode(a.x, a.y, a.size * 5);
+        shieldKills.push(...a.split());
+      } else if (ship.invincible <= 0) {
         killShip();
-        break;
+      }
+      break;
+    }
+  }
+  asteroids = asteroids.filter(a => !a.dead).concat(shieldKills);
+
+  // Nave vs cometa (y sus fragmentos)
+  if (ship.shieldTimer > 0) {
+    // El escudo pulveriza el cometa entero: los fragmentos solo nacen de un tiro
+    for (const c of comets) {
+      if (!c.dead && dist(ship, c) < ship.radius + c.radius * 0.82) {
+        c.dead = true;
+        explode(c.x, c.y, 30);
       }
     }
-    // Nave vs cometa (y sus fragmentos)
-    if (!ship.dead) {
-      for (const c of comets) {
-        if (dist(ship, c) < ship.radius + c.radius * 0.82) {
-          killShip();
-          break;
-        }
+    comets = comets.filter(c => !c.dead);
+  } else if (ship.invincible <= 0) {
+    for (const c of comets) {
+      if (dist(ship, c) < ship.radius + c.radius * 0.82) {
+        killShip();
+        break;
       }
     }
   }
@@ -598,10 +670,16 @@ function drawHUD() {
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
 
+  if (ship.shieldTimer > 0) {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#4f4';
+    ctx.fillText(`ESCUDO ${ship.shieldTimer.toFixed(1)}s`, W - 16, 44);
+  }
+
   if (ship.speedTimer > 0) {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#0ff';
-    ctx.fillText(`VEL x2 ${ship.speedTimer.toFixed(1)}s`, W - 16, 44);
+    ctx.fillText(`VEL x2 ${ship.speedTimer.toFixed(1)}s`, W - 16, 62);
   }
 }
 
