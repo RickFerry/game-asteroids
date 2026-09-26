@@ -28,9 +28,10 @@ draw();
 assert(__frames() > 0, 'carga y dibuja sin errores');
 
 // drop: un solo sorteo por asteroide (banda Velocidad: 0.10 <= r < 0.22)
+// asteroides fijados a mano: los del initGame() son aleatorios y pueden comerse el tiro
 const realRandom = Math.random;
 Math.random = () => 0.15;
-asteroids.push(new Asteroid(100, 100, 1));
+asteroids = [new Asteroid(100, 100, 1), new Asteroid(700, 550, 3)];
 bullets.push(new Bullet(100, 100, 0));
 update(0.016);
 Math.random = realRandom;
