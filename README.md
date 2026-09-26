@@ -24,11 +24,12 @@ Luego visita `http://localhost:3000`.
 
 ## Controles
 
-| Tecla     | Acción     |
-| --------- | ---------- |
-| `←` `→`   | Rotar nave |
-| `↑`       | Propulsar  |
-| `Espacio` | Disparar   |
+| Tecla     | Acción                  |
+| --------- | ----------------------- |
+| `←` `→`   | Rotar nave              |
+| `↑`       | Propulsar               |
+| `Espacio` | Disparar                |
+| `1` `2` `3` | Cambiar skin de nave  |
 
 ## Puntuación
 
@@ -45,4 +46,6 @@ Luego visita `http://localhost:3000`.
 - Partículas de explosión al destruir asteroides
 - Power-up **Escudo**: 10% de probabilidad al destruir un asteroide, dura 5 segundos y rodea la nave de una luz verde que pulveriza cualquier meteoro que toque (sin puntuación)
 - Power-up **Velocidad**: 12% de probabilidad, duplica la propulsión durante 5 segundos
+- Power-up **Triplete**: 5% de probabilidad, dispara tres balas en abanico durante 8 segundos
 - Estrella fugaz (cometa) que aparece al destruir asteroides grandes y vale 500 puntos
+- Tres skins de nave (clásica, delta y caza) seleccionables con `1` `2` `3`; la elección se recuerda entre sesiones

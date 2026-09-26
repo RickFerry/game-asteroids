@@ -8,6 +8,7 @@ const ctxStub = new Proxy({}, {
   set: () => true,
 });
 
+const store = new Map();
 const sandbox = {
   console,
   Math,
@@ -15,6 +16,13 @@ const sandbox = {
   document: { getElementById: () => ({ getContext: () => ctxStub, width: 800, height: 600 }) },
   window: { addEventListener() {} },
   requestAnimationFrame() {},
+  // game.js pide localStorage al cargar (skinIndex = loadSkin()): tiene que existir
+  // antes del vm.runInContext o el sandbox muere antes del primer assert
+  localStorage: {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  },
 };
 
 const TESTS = `
@@ -170,6 +178,8 @@ const dropBand = r => {
 assert(dropBand(0.05).join() === 'ShieldUp', '0.05 suelta Escudo (10%)');
 assert(dropBand(0.15).join() === 'SpeedUp', '0.15 suelta Velocidad, nunca ambas');
 assert(dropBand(0.5).length === 0, '0.5 no suelta nada');
+assert(dropBand(0.24).join() === 'TripleShot', '0.24 suelta Triplete en su banda (5%)');
+assert(dropBand(0.15).indexOf('TripleShot') < 0, 'el sorteo reparte un solo power-up por muerte');
 
 // ── Escudo: recogida, duración y reset ──
 initGame();
@@ -215,6 +225,70 @@ comets = [new Comet(ship.x, ship.y, 0)];
 update(0.016);
 assert(comets.length === 0, 'escudo pulveriza el cometa');
 assert(state === 'playing' && lives === 3, 'escudo protege del cometa');
+
+// ── Triplete: recogida, duración y reset ──
+initGame();
+asteroids = [new Asteroid(700, 550, 3)];   // lejos: evita nextLevel
+let bs = ship.tryShoot();
+assert(bs.length === 1, 'sin bónus dispara un solo tiro');
+
+ship.x = 100; ship.y = 100;
+powerups.push(new TripleShot(ship.x, ship.y));
+update(0.016);
+assert(powerups.length === 0, 'nave colecta el Triplete');
+assert(ship.tripleTimer === TRIPLE_TIME, 'Triplete dura 8 segundos');
+assert(ship.shieldTimer === 0, 'recoger Triplete no activa el Escudo');
+assert(ship.speedTimer === 0, 'recoger Triplete no activa la Velocidad');
+
+ship.reset();
+assert(ship.tripleTimer === 0, 'reset limpia el Triplete (muerte / nuevo nivel)');
+
+// ── Triplete: disparo triple ──
+initGame();
+ship.tripleTimer = TRIPLE_TIME;
+ship.shootCooldown = 0;
+bs = ship.tryShoot();
+assert(bs.length === 3, 'con Triplete dispara 3 tiros');
+const ang = a => Math.atan2(a.vy, a.vx);
+assert(Math.abs(ang(bs[0]) - (ship.angle - TRIPLE_SPREAD)) < 1e-9, 'tiro izquierdo desviado -TRIPLE_SPREAD');
+assert(Math.abs(ang(bs[1]) - ship.angle) < 1e-9, 'tiro central sale recto');
+assert(Math.abs(ang(bs[2]) - (ship.angle + TRIPLE_SPREAD)) < 1e-9, 'tiro derecho desviado +TRIPLE_SPREAD');
+
+ship.invincible = 999;
+for (let i = 0; i < 16; i++) update(0.05);
+assert(Math.abs(ship.tripleTimer - 7.2) < 1e-9, 'temporizador del Triplete baja con dt (7.2s tras 0.8s)');
+for (let i = 0; i < 200; i++) update(0.05);
+assert(!(ship.tripleTimer > 0), 'Triplete expira a los 8s');
+
+// ── Skins ──
+assert(skinIndex === 0, 'arranca en la skin 0 sin nada guardado');
+
+localStorage.setItem(SKIN_KEY, '99');
+assert(loadSkin() === 0, 'índice fuera de rango vuelve a la skin 0');
+localStorage.setItem(SKIN_KEY, '2');
+assert(loadSkin() === 2, 'índice guardado se restaura');
+localStorage.removeItem(SKIN_KEY);
+assert(loadSkin() === 0, 'sin guardado vuelve a la skin 0');
+
+setSkin(1);
+assert(skinIndex === 1, 'setSkin cambia la skin activa');
+assert(localStorage.getItem(SKIN_KEY) === '1', 'setSkin persiste en localStorage');
+setSkin(0);
+
+justPressed['Digit2'] = true;
+update(0.016);
+assert(skinIndex === 1, 'tecla 2 selecciona la skin 2');
+assert(localStorage.getItem(SKIN_KEY) === '1', 'el cambio por tecla se persiste');
+justPressed['Digit1'] = true;
+update(0.016);
+assert(skinIndex === 0, 'tecla 1 vuelve a la skin 1');
+
+assert(SKINS.every(s => Math.max(...s.hull.map(p => p[0])) >= 19),
+       'todas las skins tienen el nariz en x >= 19 (NOSE = 21)');
+
+for (let i = 0; i < SKINS.length; i++) { skinIndex = i; draw(); }
+skinIndex = 0;
+assert(true, 'las 3 skins y sus miniaturas se dibujan sin errores');
 `;
 
 let frames = 0;

@@ -73,6 +73,11 @@ const SHIELD_TIME   = 5;    // duración en segundos
 const SHIELD_CHANCE = 0.1;  // peso en el mismo sorteo (escudo 10%, velocidad 12%)
 const SHIELD_R      = 26;   // radio del anel de luz verde
 
+// Power-up "Triplete"
+const TRIPLE_CHANCE = 0.05; // banda propia en el sorteo de drop, tras escudo y velocidad
+const TRIPLE_TIME   = 8;    // duración del disparo triple en segundos
+const TRIPLE_SPREAD = 0.18; // radianes de apertura de los tiros laterales
+
 // Física de colisión asteroide vs asteroide
 const IMPULSE_SHARE = 0.3;  // fracción del impulso que absorbe el mayor (mayor = menor desvío)
 
@@ -85,6 +90,15 @@ const COMET_R        = 8;    // radio de la cabeza
 const COMET_PARTS    = 3;    // fragmentos al ser alcanzado
 const COMET_PART_TTL = 2;    // vida de cada fragmento
 const COMET_SAFE     = 120;  // distancia mínima a la nave al nacer
+
+// Skins de nave (solo cambian forma y color; nunca el hitbox)
+// El nariz debe quedar en x >= 19: tryShoot() nace la bala en NOSE = 21
+const SKIN_KEY = 'asteroids.skin';
+const SKINS = [
+  { name: 'Clásica', color: '#fff', hull: [[20, 0], [-12, -9], [-7, 0], [-12, 9]] },
+  { name: 'Delta',   color: '#f80', hull: [[22, 0], [6, -10], [-15, -6], [-8, 0], [-15, 6], [6, 10]] },
+  { name: 'Caza',    color: '#0f6', hull: [[20, 0], [-2, -12], [-11, -6], [-6, 0], [-11, 6], [-2, 12]] },
+];
 
 class Asteroid {
   constructor(x, y, size = 3) {
@@ -158,6 +172,7 @@ class Ship {
     this.shootCooldown = 0;
     this.speedTimer    = 0;   // power-up Velocidad activo
     this.shieldTimer   = 0;   // power-up Escudo activo
+    this.tripleTimer   = 0;   // power-up Triplete activo
     this.dead          = false;
   }
 
@@ -167,6 +182,7 @@ class Ship {
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedTimer    > 0) this.speedTimer    -= dt;
     if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
+    if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const boost = this.speedTimer > 0 ? SPEED_MULT : 1;
@@ -194,6 +210,10 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (this.tripleTimer > 0)
+      return [new Bullet(ox, oy, this.angle - TRIPLE_SPREAD),
+              new Bullet(ox, oy, this.angle),
+              new Bullet(ox, oy, this.angle + TRIPLE_SPREAD)];
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -215,26 +235,27 @@ class Ship {
       ctx.stroke();
     }
 
-    ctx.strokeStyle = this.shieldTimer > 0 ? '#4f4'
-                    : this.speedTimer  > 0 ? '#0ff' : '#fff';
+    ctx.strokeStyle = this.tripleTimer > 0 ? '#f4f'
+                    : this.shieldTimer > 0 ? '#4f4'
+                    : this.speedTimer  > 0 ? '#0ff'
+                    : SKINS[skinIndex].color;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
-    // Silueta clásica: triángulo con muesca trasera
+    // Silueta de la skin activa
+    const hull = SKINS[skinIndex].hull;
     ctx.beginPath();
-    ctx.moveTo( 20,  0);   // nariz
-    ctx.lineTo(-12, -9);   // ala izquierda
-    ctx.lineTo( -7,  0);   // muesca trasera
-    ctx.lineTo(-12,  9);   // ala derecha
+    hull.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
     ctx.closePath();
     ctx.stroke();
 
-    // Llama del propulsor
+    // Llama del propulsor, anclada a la cola del casco (con la Clásica da -8)
+    const tail = Math.min(...hull.map(p => p[0])) + 4;
     if (this.thrusting && Math.random() > 0.35) {
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
+      ctx.moveTo(tail, -4);
+      ctx.lineTo(tail - rand(6, 14), 0);
+      ctx.lineTo(tail,  4);
       ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
       ctx.stroke();
     }
@@ -343,6 +364,40 @@ class ShieldUp {
   apply(ship) { ship.shieldTimer = SHIELD_TIME; }
 }
 
+// ── Power-up: Triplete ────────────────────────────────────────────────────────
+class TripleShot {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 10;
+    this.ttl  = 12;   // desaparece si no se recoge
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    const blink = this.ttl < 3 && Math.floor(this.ttl * 6) % 2 === 0;
+    if (blink) return;
+
+    ctx.strokeStyle = '#f4f';
+    ctx.fillStyle   = '#f4f';
+    ctx.lineWidth   = 2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.font      = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('x3', this.x, this.y + 4);
+  }
+
+  apply(ship) { ship.tripleTimer = TRIPLE_TIME; }
+}
+
 // ── Cometa (estrella fugaz) ───────────────────────────────────────────────────
 class Comet {
   constructor(x, y, angle, isFragment = false) {
@@ -394,6 +449,19 @@ let ship, bullets, asteroids, particles, powerups, comets;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
+let skinIndex = loadSkin();
+
+function loadSkin() {
+  try {
+    const i = parseInt(localStorage.getItem(SKIN_KEY), 10);
+    return i >= 0 && i < SKINS.length ? i : 0;  // valor corrupto = skin 0
+  } catch { return 0; }  // file:// o modo privativo puede lanzar
+}
+
+function setSkin(i) {
+  skinIndex = i;
+  try { localStorage.setItem(SKIN_KEY, String(i)); } catch {}
+}
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -509,6 +577,9 @@ function killShip() {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 function update(dt) {
+  // Skin: se puede cambiar en cualquier estado
+  SKINS.forEach((s, i) => { if (pressed('Digit' + (i + 1))) setSkin(i); });
+
   if (state === 'gameover') {
     if (pressed('Space')) initGame();
     particles.forEach(p => p.update(dt));
@@ -551,9 +622,11 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        const drop = Math.random();   // un solo sorteo: escudo 10%, velocidad 12%
+        const drop = Math.random();   // un solo sorteo: escudo 10%, velocidad 12%, triplete 5%
         if (drop < SHIELD_CHANCE) powerups.push(new ShieldUp(a.x, a.y));
         else if (drop < SHIELD_CHANCE + SPEED_CHANCE) powerups.push(new SpeedUp(a.x, a.y));
+        else if (drop < SHIELD_CHANCE + SPEED_CHANCE + TRIPLE_CHANCE)
+          powerups.push(new TripleShot(a.x, a.y));
         if (a.size === 3 && Math.random() < COMET_CHANCE) {
           // No nacer encima de la nave: se empuja el punto hasta COMET_SAFE
           let cx = a.x, cy = a.y;
@@ -681,6 +754,40 @@ function drawHUD() {
     ctx.fillStyle = '#0ff';
     ctx.fillText(`VEL x2 ${ship.speedTimer.toFixed(1)}s`, W - 16, 62);
   }
+
+  if (ship.tripleTimer > 0) {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#f4f';
+    ctx.fillText(`TRIPLE x3 ${ship.tripleTimer.toFixed(1)}s`, W - 16, 80);
+  }
+
+  drawSkinPreviews();
+}
+
+// Miniaturas de las skins arriba al centro; la activa va más grande.
+// El número bajo cada una es la tecla que la selecciona (1..n).
+function drawSkinPreviews() {
+  const cx = W / 2, y = 58, gap = 36;
+  SKINS.forEach((s, i) => {
+    const k = i === skinIndex ? 0.7 : 0.5;
+    ctx.save();
+    ctx.translate(cx + (i - (SKINS.length - 1) / 2) * gap, y);
+    ctx.rotate(-Math.PI / 2);          // el nariz (+x local) mira arriba
+    ctx.scale(k, k);
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth   = (i === skinIndex ? 2 : 1) / k;
+    ctx.beginPath();
+    s.hull.forEach((p, j) => j ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle   = s.color;
+    ctx.font        = '10px monospace';
+    ctx.textAlign   = 'center';
+    ctx.fillText(String(i + 1), cx + (i - (SKINS.length - 1) / 2) * gap, y + 22);
+  });
+  ctx.font = '15px monospace';  // el HUD sigue con su tamaño
 }
 
 function drawOverlay(title, sub) {
