@@ -71,6 +71,16 @@ const DROP_CHANCE  = 0.12;  // probabilidad de soltarlo al destruir un asteroide
 // Física de colisión asteroide vs asteroide
 const IMPULSE_SHARE = 0.3;  // fracción del impulso que absorbe el mayor (mayor = menor desvío)
 
+// Cometa
+const COMET_SPEED    = 2 * SPEEDS[3];  // 2x la velocidad del asteroide grande
+const COMET_TTL      = 10;   // segundos en pantalla
+const COMET_CHANCE   = 0.05; // probabilidad al destruir un asteroide grande
+const COMET_POINTS   = 500;
+const COMET_R        = 8;    // radio de la cabeza
+const COMET_PARTS    = 3;    // fragmentos al ser alcanzado
+const COMET_PART_TTL = 2;    // vida de cada fragmento
+const COMET_SAFE     = 120;  // distancia mínima a la nave al nacer
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -279,8 +289,54 @@ class SpeedUp {
   }
 }
 
+// ── Cometa (estrella fugaz) ───────────────────────────────────────────────────
+class Comet {
+  constructor(x, y, angle, isFragment = false) {
+    this.x = x;
+    this.y = y;
+    const speed = isFragment ? COMET_SPEED * 1.4 : COMET_SPEED;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.radius  = isFragment ? COMET_R / 2 : COMET_R;
+    this.ttl     = isFragment ? COMET_PART_TTL : COMET_TTL;
+    this.value   = isFragment ? 0 : COMET_POINTS;
+    this.dead    = false;
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  // Se parte en varios fragmentos que siguen el mismo rumo con algo de dispersión
+  split() {
+    const parts = [];
+    const heading = Math.atan2(this.vy, this.vx);
+    for (let i = 0; i < COMET_PARTS; i++)
+      parts.push(new Comet(this.x, this.y, heading + rand(-0.5, 0.5), true));
+    return parts;
+  }
+
+  draw() {
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    // Estela: rastro de 0.35s hacia atrás
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(this.x - this.vx * 0.35, this.y - this.vy * 0.35);
+    ctx.stroke();
+    // Cabeza
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
 // ── Estado del juego ──────────────────────────────────────────────────────────
-let ship, bullets, asteroids, particles, powerups;
+let ship, bullets, asteroids, particles, powerups, comets;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
@@ -303,6 +359,7 @@ function initGame() {
   asteroids = [];
   particles = [];
   powerups  = [];
+  comets    = [];
   score  = 0;
   lives  = 3;
   level  = 1;
@@ -315,6 +372,7 @@ function nextLevel() {
   bullets   = [];
   particles = [];
   powerups  = [];
+  comets    = [];
   ship.reset();
   spawnAsteroids(3 + level);
 }
@@ -423,9 +481,11 @@ function update(dt) {
   asteroids.forEach(a => a.update(dt));
   particles.forEach(p => p.update(dt));
   powerups.forEach(p => p.update(dt));
+  comets.forEach(c => c.update(dt));
 
   bullets   = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
+  comets    = comets.filter(c => !c.dead);
 
   // Bala vs asteroide
   const newAsteroids = [];
@@ -438,11 +498,38 @@ function update(dt) {
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         if (Math.random() < DROP_CHANCE) powerups.push(new SpeedUp(a.x, a.y));
+        if (a.size === 3 && Math.random() < COMET_CHANCE) {
+          // No nacer encima de la nave: se empuja el punto hasta COMET_SAFE
+          let cx = a.x, cy = a.y;
+          const gap = COMET_SAFE - dist({ x: cx, y: cy }, ship);
+          if (gap > 0) {
+            const ang = Math.atan2(cy - ship.y, cx - ship.x);
+            cx = wrap(cx + Math.cos(ang) * gap, W);
+            cy = wrap(cy + Math.sin(ang) * gap, H);
+          }
+          comets.push(new Comet(cx, cy, rand(0, Math.PI * 2)));
+        }
       }
     }
   }
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
+
+  // Bala vs cometa: se parte en fragmentos
+  const newComets = [];
+  for (const b of bullets) {
+    for (const c of comets) {
+      if (!c.dead && !b.dead && dist(b, c) < c.radius) {
+        b.dead = true;
+        c.dead = true;
+        score += c.value;
+        explode(c.x, c.y, 30);
+        newComets.push(...c.split());
+      }
+    }
+  }
+  comets = comets.filter(c => !c.dead).concat(newComets);
+  bullets = bullets.filter(b => !b.dead);
 
   // Colisión asteroide vs asteroide (física)
   collideAsteroids();
@@ -463,6 +550,15 @@ function update(dt) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
         killShip();
         break;
+      }
+    }
+    // Nave vs cometa (y sus fragmentos)
+    if (!ship.dead) {
+      for (const c of comets) {
+        if (dist(ship, c) < ship.radius + c.radius * 0.82) {
+          killShip();
+          break;
+        }
       }
     }
   }
@@ -527,6 +623,7 @@ function draw() {
   asteroids.forEach(a => a.draw());
   bullets.forEach(b => b.draw());
   powerups.forEach(p => p.draw());
+  comets.forEach(c => c.draw());
   ship.draw();
 
   drawHUD();
