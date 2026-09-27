@@ -74,8 +74,7 @@ const SHIELD_CHANCE = 0.1;  // peso en el mismo sorteo (escudo 10%, velocidad 12
 const SHIELD_R      = 26;   // radio del anel de luz verde
 
 // Power-up "Triplete"
-const TRIPLE_CHANCE = 0.05; // banda propia en el sorteo de drop, tras escudo y velocidad
-const TRIPLE_TIME   = 8;    // duración del disparo triple en segundos
+const TRIPLE_CHANCE = 0.12; // sorteo propio: 12% por asteroide destruido
 const TRIPLE_SPREAD = 0.18; // radianes de apertura de los tiros laterales
 
 // Física de colisión asteroide vs asteroide
@@ -172,7 +171,7 @@ class Ship {
     this.shootCooldown = 0;
     this.speedTimer    = 0;   // power-up Velocidad activo
     this.shieldTimer   = 0;   // power-up Escudo activo
-    this.tripleTimer   = 0;   // power-up Triplete activo
+    this.tripleActive  = false;  // power-up Triplete activo
     this.dead          = false;
   }
 
@@ -182,7 +181,6 @@ class Ship {
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedTimer    > 0) this.speedTimer    -= dt;
     if (this.shieldTimer   > 0) this.shieldTimer   -= dt;
-    if (this.tripleTimer   > 0) this.tripleTimer   -= dt;
 
     const ROT   = 3.5;   // rad/s
     const boost = this.speedTimer > 0 ? SPEED_MULT : 1;
@@ -210,7 +208,7 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
-    if (this.tripleTimer > 0)
+    if (this.tripleActive)
       return [new Bullet(ox, oy, this.angle - TRIPLE_SPREAD),
               new Bullet(ox, oy, this.angle),
               new Bullet(ox, oy, this.angle + TRIPLE_SPREAD)];
@@ -235,7 +233,7 @@ class Ship {
       ctx.stroke();
     }
 
-    ctx.strokeStyle = this.tripleTimer > 0 ? '#f4f'
+    ctx.strokeStyle = this.tripleActive ? '#f4f'
                     : this.shieldTimer > 0 ? '#4f4'
                     : this.speedTimer  > 0 ? '#0ff'
                     : SKINS[skinIndex].color;
@@ -395,7 +393,7 @@ class TripleShot {
     ctx.fillText('x3', this.x, this.y + 4);
   }
 
-  apply(ship) { ship.tripleTimer = TRIPLE_TIME; }
+  apply(ship) { ship.tripleActive = true; }
 }
 
 // ── Cometa (estrella fugaz) ───────────────────────────────────────────────────
@@ -622,11 +620,10 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
-        const drop = Math.random();   // un solo sorteo: escudo 10%, velocidad 12%, triplete 5%
-        if (drop < SHIELD_CHANCE) powerups.push(new ShieldUp(a.x, a.y));
-        else if (drop < SHIELD_CHANCE + SPEED_CHANCE) powerups.push(new SpeedUp(a.x, a.y));
-        else if (drop < SHIELD_CHANCE + SPEED_CHANCE + TRIPLE_CHANCE)
-          powerups.push(new TripleShot(a.x, a.y));
+        // Cada power-up tira su propio dado: pueden caer varios en el mismo asteroide
+        if (Math.random() < SHIELD_CHANCE) powerups.push(new ShieldUp(a.x, a.y));
+        if (Math.random() < SPEED_CHANCE)  powerups.push(new SpeedUp(a.x, a.y));
+        if (Math.random() < TRIPLE_CHANCE) powerups.push(new TripleShot(a.x, a.y));
         if (a.size === 3 && Math.random() < COMET_CHANCE) {
           // No nacer encima de la nave: se empuja el punto hasta COMET_SAFE
           let cx = a.x, cy = a.y;
@@ -755,10 +752,10 @@ function drawHUD() {
     ctx.fillText(`VEL x2 ${ship.speedTimer.toFixed(1)}s`, W - 16, 62);
   }
 
-  if (ship.tripleTimer > 0) {
+  if (ship.tripleActive) {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#f4f';
-    ctx.fillText(`TRIPLE x3 ${ship.tripleTimer.toFixed(1)}s`, W - 16, 80);
+    ctx.fillText(`TRIPLE x3`, W - 16, 80);
   }
 
   drawSkinPreviews();

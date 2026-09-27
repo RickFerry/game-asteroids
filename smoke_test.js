@@ -35,22 +35,23 @@ initGame();
 draw();
 assert(__frames() > 0, 'carga y dibuja sin errores');
 
-// drop: un solo sorteo por asteroide (banda Velocidad: 0.10 <= r < 0.22)
-// asteroides fijados a mano: los del initGame() son aleatorios y pueden comerse el tiro
+// drop: cada power-up tiene su propio sorteo (independientes: pueden caer varios juntos)
+// asteroides fijados a mano: los de initGame() son aleatorios y pueden comerse el tiro
 const realRandom = Math.random;
-Math.random = () => 0.15;
+Math.random = () => 0.11;   // < 0.12 (velocidad y triplete), >= 0.10 (sin escudo)
 asteroids = [new Asteroid(100, 100, 1), new Asteroid(700, 550, 3)];
 bullets.push(new Bullet(100, 100, 0));
 update(0.016);
 Math.random = realRandom;
-assert(powerups.length === 1, 'asteroide suelta el power-up');
-assert(dist(powerups[0], { x: 100, y: 100 }) < 5, 'power-up nace donde murió el asteroide');
+assert(powerups.length === 2, 'asteroide suelta velocidad y triplete (sorteos independientes)');
+assert(powerups.every(p => dist(p, { x: 100, y: 100 }) < 5), 'los power-ups nacen donde murió el asteroide');
 assert(ship.speedTimer === 0, 'sin bónus antes de colectar');
 
 ship.x = 100; ship.y = 100;
 update(0.016);
-assert(powerups.length === 0, 'nave colecta el power-up');
-assert(ship.speedTimer === 5, 'bónus dura 5 segundos');
+assert(powerups.length === 0, 'nave colecta los power-ups');
+assert(ship.speedTimer === 5, 'bónus de velocidad dura 5 segundos');
+assert(ship.tripleActive === true, 'el Triplete queda activo');
 
 ship.invincible = 999;   // que un asteroide no mate la nave en medio de los tiempos
 for (let i = 0; i < 10; i++) update(0.05);
@@ -165,8 +166,8 @@ ship.invincible = 0;
 update(0.016);
 assert(state === 'dead' && lives === 2, 'cometa destruye la nave');
 
-// ── Escudo: el sorteo único reparte escudo (10%), velocidad (12%) o nada ──
-const dropBand = r => {
+// ── Drop: cada power-up tiene su propio sorteo ──
+const dropAt = r => {
   initGame();
   Math.random = () => r;
   asteroids = [new Asteroid(300, 300, 1), new Asteroid(700, 550, 3)];
@@ -175,11 +176,11 @@ const dropBand = r => {
   Math.random = r0;
   return powerups.map(p => p.constructor.name).sort();
 };
-assert(dropBand(0.05).join() === 'ShieldUp', '0.05 suelta Escudo (10%)');
-assert(dropBand(0.15).join() === 'SpeedUp', '0.15 suelta Velocidad, nunca ambas');
-assert(dropBand(0.5).length === 0, '0.5 no suelta nada');
-assert(dropBand(0.24).join() === 'TripleShot', '0.24 suelta Triplete en su banda (5%)');
-assert(dropBand(0.15).indexOf('TripleShot') < 0, 'el sorteo reparte un solo power-up por muerte');
+assert(dropAt(0.05).join()   === 'ShieldUp,SpeedUp,TripleShot', '0.05 suelta los tres a la vez (sorteos independientes)');
+assert(dropAt(0.11).join()   === 'SpeedUp,TripleShot', '0.11 suelta Velocidad y Triplete, no Escudo');
+assert(dropAt(0.119).join()  === 'SpeedUp,TripleShot', 'el Triplete entra por debajo de 0.12');
+assert(dropAt(0.121).length === 0, 'a 0.121 el Triplete ya no cae (y tampoco la velocidad)');
+assert(dropAt(0.5).length === 0, '0.5 no suelta nada');
 
 // ── Escudo: recogida, duración y reset ──
 initGame();
@@ -226,7 +227,7 @@ update(0.016);
 assert(comets.length === 0, 'escudo pulveriza el cometa');
 assert(state === 'playing' && lives === 3, 'escudo protege del cometa');
 
-// ── Triplete: recogida, duración y reset ──
+// ── Triplete: recogida, duración indefinida y pérdida por muerte / nivel ──
 initGame();
 asteroids = [new Asteroid(700, 550, 3)];   // lejos: evita nextLevel
 let bs = ship.tryShoot();
@@ -236,16 +237,16 @@ ship.x = 100; ship.y = 100;
 powerups.push(new TripleShot(ship.x, ship.y));
 update(0.016);
 assert(powerups.length === 0, 'nave colecta el Triplete');
-assert(ship.tripleTimer === TRIPLE_TIME, 'Triplete dura 8 segundos');
+assert(ship.tripleActive === true, 'Triplete se activa al recogerlo');
 assert(ship.shieldTimer === 0, 'recoger Triplete no activa el Escudo');
 assert(ship.speedTimer === 0, 'recoger Triplete no activa la Velocidad');
 
 ship.reset();
-assert(ship.tripleTimer === 0, 'reset limpia el Triplete (muerte / nuevo nivel)');
+assert(ship.tripleActive === false, 'reset limpia el Triplete (muerte / nuevo nivel)');
 
-// ── Triplete: disparo triple ──
+// el Triplete no caduca con el tiempo
 initGame();
-ship.tripleTimer = TRIPLE_TIME;
+ship.tripleActive = true;
 ship.shootCooldown = 0;
 bs = ship.tryShoot();
 assert(bs.length === 3, 'con Triplete dispara 3 tiros');
@@ -255,10 +256,22 @@ assert(Math.abs(ang(bs[1]) - ship.angle) < 1e-9, 'tiro central sale recto');
 assert(Math.abs(ang(bs[2]) - (ship.angle + TRIPLE_SPREAD)) < 1e-9, 'tiro derecho desviado +TRIPLE_SPREAD');
 
 ship.invincible = 999;
-for (let i = 0; i < 16; i++) update(0.05);
-assert(Math.abs(ship.tripleTimer - 7.2) < 1e-9, 'temporizador del Triplete baja con dt (7.2s tras 0.8s)');
 for (let i = 0; i < 200; i++) update(0.05);
-assert(!(ship.tripleTimer > 0), 'Triplete expira a los 8s');
+assert(ship.tripleActive === true, 'el Triplete no caduca con el tiempo (200 updates)');
+
+// se pierde al cambiar de nivel
+initGame();
+ship.tripleActive = true;
+asteroids = [];
+update(0.016);
+assert(ship.tripleActive === false, 'el Triplete se pierde al cambiar de nivel');
+
+// se pierde al morir (el reset lo limpia al reaparecer)
+initGame();
+ship.tripleActive = true;
+killShip();
+for (let i = 0; i < 41; i++) update(0.05);   // deadTimer = 2s → reaparece
+assert(ship.tripleActive === false, 'el Triplete se pierde al morir');
 
 // ── Skins ──
 assert(skinIndex === 0, 'arranca en la skin 0 sin nada guardado');
